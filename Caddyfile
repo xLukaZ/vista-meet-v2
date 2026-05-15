@@ -1,0 +1,29 @@
+# Replace YOUR_DOMAIN with your actual domain, e.g. meet.example.com
+# Caddy automatically provisions a Let's Encrypt TLS cert.
+YOUR_DOMAIN {
+    # Proxy all API paths to the Node backend
+    handle /dev/* {
+        reverse_proxy localhost:3001
+    }
+    handle /auth/* {
+        reverse_proxy localhost:3001
+    }
+    handle /health {
+        reverse_proxy localhost:3001
+    }
+    handle /rooms/* {
+        reverse_proxy localhost:3001
+    }
+    handle /sessions/* {
+        reverse_proxy localhost:3001
+    }
+
+    # Serve built React SPA for everything else
+    handle {
+        root * /var/www/vista-meet
+        try_files {path} /index.html
+        file_server
+    }
+
+    encode gzip
+}

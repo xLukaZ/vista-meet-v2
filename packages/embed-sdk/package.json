@@ -1,0 +1,26 @@
+{
+  "name": "@meet-vista/embed-sdk",
+  "version": "0.0.0",
+  "private": true,
+  "main": "./dist/embed.js",
+  "types": "./dist/embed.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/embed.js",
+      "require": "./dist/embed.js",
+      "types": "./dist/embed.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "@meet-vista/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@meet-vista/config": "workspace:*",
+    "typescript": "^5.4.5"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "@meet-vista/config",
+  "version": "0.0.0",
+  "private": true,
+  "exports": {
+    "./tsconfig": "./tsconfig.base.json",
+    "./eslint": "./eslint.config.js",
+    "./tailwind": "./tailwind.config.ts"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5",
+    "eslint": "^8.57.1",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
+    "tailwindcss": "^3.4.13"
+  }
+}

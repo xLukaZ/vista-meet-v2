@@ -7,6 +7,7 @@ import type {
   CameraPose,
   MatterportObjectLayer,
 } from "./types.js";
+import { TagObjectLayer } from "./TagObjectLayer.js";
 
 // ─── Runtime implementation ───────────────────────────────────────────────────
 
@@ -63,7 +64,10 @@ export class MatterportRuntimeImpl implements IMatterportRuntime {
     // Grab the iframe setupSdk created so we can remove it on dispose()
     this.iframe = container.querySelector("iframe");
 
-    // Step 3: Subscribe to camera events and mark as ready
+    // Step 3: Initialise the Tag-based object layer for 3D avatar placeholders
+    this.objectLayer = new TagObjectLayer(this.mpSdk);
+
+    // Step 4: Subscribe to camera events and mark as ready
     this.bindCameraEvents();
     this.ready = true;
     for (const cb of this.readyListeners) cb();
@@ -122,10 +126,9 @@ export class MatterportRuntimeImpl implements IMatterportRuntime {
     return () => this.cameraListeners.delete(cb);
   }
 
-  /** Object layer — fully implemented in Sprint 4. */
   getObjectLayer(): MatterportObjectLayer {
     if (!this.objectLayer) {
-      throw createError("MP_LOAD_FAILED", "Object layer not initialized — implemented in Sprint 4");
+      throw createError("MP_LOAD_FAILED", "Matterport not ready — call mount() first");
     }
     return this.objectLayer;
   }

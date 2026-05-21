@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { MatterportRuntimeImpl } from "@meet-vista/matterport-runtime";
-import type { CameraPose } from "@meet-vista/matterport-runtime";
+import type { CameraPose, MatterportObjectLayer } from "@meet-vista/matterport-runtime";
+import { createAvatarObject } from "@meet-vista/matterport-objects";
 
 const SDK_KEY = import.meta.env["VITE_MATTERPORT_SDK_KEY"] as string;
 const DEFAULT_MODEL = (import.meta.env["VITE_MATTERPORT_MODEL_ID"] as string) ?? "SxQL3iGyoDo";
@@ -176,6 +177,10 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [pose, setPose] = useState<CameraPose | null>(null);
 
+  // ─── Avatar / object layer state ──────────────────────────────────────────
+  const [avatarName, setAvatarName] = useState("Test-Avatar");
+  const [placedAvatars, setPlacedAvatars] = useState<{ id: string; name: string }[]>([]);
+
   const mount = useCallback(async () => {
     if (!containerRef.current) return;
 
@@ -200,7 +205,7 @@ export function App() {
       await runtime.mount(containerRef.current, {
         modelId: modelId.trim() || DEFAULT_MODEL,
         sdkKey: SDK_KEY,
-        bundleUrl: BUNDLE_URL,
+        ...(BUNDLE_URL ? { bundleUrl: BUNDLE_URL } : {}),
         options: { autoplay: true },
       });
       setStatus("connected");
@@ -214,6 +219,43 @@ export function App() {
     if (!runtimeRef.current?.isReady()) return;
     try {
       await runtimeRef.current.teleport(preset);
+    } catch { /* ignore */ }
+  }, []);
+
+  const placeAvatarHere = useCallback(async () => {
+    const runtime = runtimeRef.current;
+    if (!runtime?.isReady() || !pose) return;
+    const layer: MatterportObjectLayer = runtime.getObjectLayer();
+    const obj = createAvatarObject({
+      userId: `user_${Date.now()}`,
+      displayName: avatarName || "Avatar",
+      transform: {
+        position: { ...pose.position },
+        rotation: { x: 0, y: pose.rotation.y, z: 0, w: 1 },
+        scale: { x: 1, y: 1, z: 1 },
+      },
+    });
+    try {
+      const id = await layer.addObject(obj);
+      setPlacedAvatars((prev) => [...prev, { id, name: avatarName || "Avatar" }]);
+    } catch { /* ignore */ }
+  }, [pose, avatarName]);
+
+  const removeAvatar = useCallback(async (id: string) => {
+    const runtime = runtimeRef.current;
+    if (!runtime?.isReady()) return;
+    try {
+      await runtime.getObjectLayer().removeObject(id);
+      setPlacedAvatars((prev) => prev.filter((a) => a.id !== id));
+    } catch { /* ignore */ }
+  }, []);
+
+  const clearAvatars = useCallback(async () => {
+    const runtime = runtimeRef.current;
+    if (!runtime?.isReady()) return;
+    try {
+      await runtime.getObjectLayer().clear();
+      setPlacedAvatars([]);
     } catch { /* ignore */ }
   }, []);
 
@@ -279,6 +321,46 @@ export function App() {
                   → {p.label}
                 </button>
               ))}
+            </div>
+          )}
+
+          {/* Avatar placement (Sprint 4 test) */}
+          {status === "connected" && (
+            <div style={S.section}>
+              <div style={S.sectionTitle}>Avatare (Sprint 4)</div>
+              <input
+                style={{ ...S.input, marginBottom: "6px" }}
+                value={avatarName}
+                onChange={(e) => setAvatarName(e.target.value)}
+                placeholder="Name"
+                spellCheck={false}
+              />
+              <button
+                style={{ ...S.btn("primary"), marginBottom: "6px" }}
+                onClick={() => void placeAvatarHere()}
+                disabled={!pose}
+              >
+                + Hier platzieren
+              </button>
+              {placedAvatars.length > 0 && (
+                <>
+                  {placedAvatars.map((a) => (
+                    <div key={a.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "4px" }}>
+                      <span style={{ color: "#AD38B5", fontSize: "11px" }}>● {a.name}</span>
+                      <button
+                        style={{ background: "none", border: "none", color: "#555", cursor: "pointer", fontSize: "12px", padding: "0 4px" }}
+                        onClick={() => void removeAvatar(a.id)}
+                      >✕</button>
+                    </div>
+                  ))}
+                  <button style={{ ...S.btn("default"), marginTop: "4px", fontSize: "11px" }} onClick={() => void clearAvatars()}>
+                    Alle entfernen
+                  </button>
+                </>
+              )}
+              {placedAvatars.length === 0 && (
+                <span style={{ color: "#444", fontSize: "11px" }}>Bewege die Kamera und platziere einen Avatar an der aktuellen Position.</span>
+              )}
             </div>
           )}
 

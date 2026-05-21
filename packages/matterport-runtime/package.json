@@ -17,6 +17,7 @@
     "dev": "tsc --watch"
   },
   "dependencies": {
+    "@matterport/sdk": "^1.6.0",
     "@meet-vista/core": "workspace:*"
   },
   "devDependencies": {

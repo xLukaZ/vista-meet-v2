@@ -299,6 +299,9 @@ importers:
 
   packages/matterport-runtime:
     dependencies:
+      '@matterport/sdk':
+        specifier: ^1.6.0
+        version: 1.6.0
       '@meet-vista/core':
         specifier: workspace:*
         version: link:../core
@@ -999,6 +1002,10 @@ packages:
 
   '@livekit/protocol@1.45.8':
     resolution: {integrity: sha512-Q+l57E7w/xxOBFVWzdX5rkAZO7ffyF+rlDzNUYq2SU114+5aTyCq+PK4unaEVDNd4952Af7wteKr3sOgasGuaA==}
+
+  '@matterport/sdk@1.6.0':
+    resolution: {integrity: sha512-giW+Nchw/DR9pAib9vRPb2Nijw5clJ76DVhgP7seNfCpNdlSIfefvl54RYAHpk5ST5ZPkCvl7yDGbY3kA8DmTA==}
+    hasBin: true
 
   '@msgpackr-extract/msgpackr-extract-darwin-arm64@3.0.3':
     resolution: {integrity: sha512-QZHtlVgbAdy2zAqNA9Gu1UpIuI8Xvsd1v8ic6B2pZmeFnFcMWiPLfWXh7TVw4eGEZ/C9TH281KwhVoeQUKbyjw==}
@@ -3342,6 +3349,8 @@ snapshots:
   '@livekit/protocol@1.45.8':
     dependencies:
       '@bufbuild/protobuf': 1.10.1
+
+  '@matterport/sdk@1.6.0': {}
 
   '@msgpackr-extract/msgpackr-extract-darwin-arm64@3.0.3':
     optional: true

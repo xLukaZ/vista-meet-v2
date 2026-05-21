@@ -4,16 +4,21 @@ export type { Vec3, Quat };
 
 export type CameraPose = {
   position: Vec3;
+  /** Euler angles in degrees (x=pitch, y=yaw, z=roll). w is unused but kept for type compat. */
   rotation: Quat;
   fov: number;
 };
 
 export type MatterportConfig = {
   modelId: string;
-  bundleUrl: string;
+  sdkKey: string;
+  /**
+   * URL of the Matterport showcase-sdk script.
+   * Defaults to the Matterport CDN bundle if omitted.
+   */
+  bundleUrl?: string;
   options?: {
     hideUI?: boolean;
-    startScene?: string;
     autoplay?: boolean;
   };
 };

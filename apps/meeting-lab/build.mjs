@@ -6,7 +6,7 @@ import postcss from 'postcss';
 import tailwindcss from 'tailwindcss';
 import autoprefixer from 'autoprefixer';
 import { writeFileSync, mkdirSync, rmSync, readFileSync, existsSync } from 'fs';
-import { resolve, dirname } from 'path';
+import { resolve, dirname, basename } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -36,8 +36,6 @@ function loadEnv(dir) {
 const envVars = loadEnv(root);
 
 // Build the import.meta.env replacement object.
-// Replacing the whole `import.meta.env` at once (rather than individual keys)
-// avoids esbuild hangs caused by complex expression matching on nested accessors.
 const isDev = process.env.NODE_ENV === 'development';
 const envObj = {
   MODE: isDev ? 'development' : 'production',
@@ -45,11 +43,9 @@ const envObj = {
   PROD: !isDev,
   SSR: false,
 };
-// .env file vars (only VITE_* are exposed to the client, same as Vite)
 for (const [key, val] of Object.entries(envVars)) {
   if (key.startsWith('VITE_')) envObj[key] = process.env[key] ?? val;
 }
-// Shell env vars override .env file
 for (const [key, val] of Object.entries(process.env)) {
   if (key.startsWith('VITE_')) envObj[key] = val;
 }
@@ -66,19 +62,47 @@ mkdirSync(outdir, { recursive: true });
 
 // Pre-process Tailwind CSS through PostCSS before passing to esbuild.
 // esbuild does not run PostCSS plugins, so @tailwind directives must be compiled first.
-// Strategy: temporarily overwrite src/index.css with the compiled output, then restore.
+//
+// NOTE: We pass the Tailwind config as an inline object rather than pointing to
+// tailwind.config.ts. This avoids jiti (the TS loader used by Tailwind) which
+// hangs indefinitely on Node 25 / macOS 26 ARM64 when loading .ts config files.
+// Keep this object in sync with tailwind.config.ts.
+const tailwindConfig = {
+  content: ['./index.html', './src/**/*.{ts,tsx}'],
+  theme: {
+    extend: {
+      colors: {
+        brand: {
+          300: '#d478dc',
+          400: '#c355cb',
+          500: '#AD38B5',
+          600: '#8f2c96',
+          700: '#6e2174',
+        },
+        vista: {
+          bg: '#0a0a0a',
+          surface: '#141414',
+          raised: '#1e1e1e',
+          elevated: '#262626',
+          border: '#2a2a2a',
+          muted: '#666666',
+        },
+      },
+    },
+  },
+  plugins: [],
+};
+
 console.log('Processing Tailwind CSS...');
 const indexCssPath = resolve(root, 'src/index.css');
 const rawCss = readFileSync(indexCssPath, 'utf8');
-// chdir to the meeting-lab root so Tailwind content globs ("./src/**") resolve correctly
 const origCwd = process.cwd();
 process.chdir(root);
 const postcssResult = await postcss([
-  tailwindcss({ config: resolve(root, 'tailwind.config.ts') }),
+  tailwindcss(tailwindConfig),
   autoprefixer,
 ]).process(rawCss, { from: indexCssPath });
 process.chdir(origCwd);
-// Temporarily replace src/index.css with compiled CSS so esbuild picks it up
 writeFileSync(indexCssPath, postcssResult.css);
 console.log(`Tailwind compiled: ${postcssResult.css.length} bytes`);
 
@@ -91,7 +115,6 @@ try {
     format: 'esm',
     splitting: true,
     jsx: 'automatic',
-    // Use 'css' (global, not 'local-css') so Tailwind utility classes are not scoped
     loader: { '.css': 'css' },
     minify: true,
     sourcemap: true,
@@ -107,17 +130,13 @@ try {
     metafile: true,
   });
 } finally {
-  // Always restore the original src/index.css with Tailwind directives
   writeFileSync(indexCssPath, rawCss);
 }
 
-// Find output file names from esbuild metadata
 const outputs = Object.keys(result.metafile.outputs);
 const jsEntry  = outputs.find(f => f.includes('main-') && f.endsWith('.js') && !f.endsWith('.map'));
 const cssEntry = outputs.find(f => f.endsWith('.css') && !f.endsWith('.map'));
 
-// Use basename so paths are always /assets/<file> regardless of CWD during build
-import { basename } from 'path';
 const jsFile  = jsEntry  ? '/assets/' + basename(jsEntry)  : '/assets/main.js';
 const cssFile = cssEntry ? '/assets/' + basename(cssEntry) : null;
 

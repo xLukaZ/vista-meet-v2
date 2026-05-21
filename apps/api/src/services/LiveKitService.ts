@@ -1,4 +1,4 @@
-import { AccessToken, RoomServiceClient, TrackSource } from "livekit-server-sdk";
+import { AccessToken, RoomServiceClient, TrackSource, DataPacket_Kind } from "livekit-server-sdk";
 
 export type LiveKitTokenOptions = {
   roomId: string;
@@ -106,6 +106,17 @@ export class LiveKitService {
         },
       });
     }
+  }
+
+  /**
+   * Send a JSON data message to all participants (or specific ones) in a room.
+   * Used to notify clients of server-initiated events (meeting ended, denied, etc.)
+   */
+  async sendData(roomId: string, payload: Record<string, unknown>, destinationIdentities?: string[]): Promise<void> {
+    const data = new TextEncoder().encode(JSON.stringify(payload));
+    await this.roomService.sendData(roomId, data, DataPacket_Kind.RELIABLE, {
+      ...(destinationIdentities ? { destinationIdentities } : {}),
+    });
   }
 
   /** Admit a waiting participant: grant full publish/subscribe permissions. */

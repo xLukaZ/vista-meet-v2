@@ -9,6 +9,7 @@ type MeetingStore = {
   roomId: string;
   meetingName: string;
   localUserId: string;
+  hostSecret: string;
 
   setClient: (client: LiveKitMeetingClient) => void;
   setState: (state: ConnectionState) => void;
@@ -16,6 +17,7 @@ type MeetingStore = {
   setRoomId: (roomId: string) => void;
   setMeetingName: (name: string) => void;
   setLocalUserId: (id: string) => void;
+  setHostSecret: (secret: string) => void;
   reset: () => void;
 };
 
@@ -26,6 +28,7 @@ export const useMeetingStore = create<MeetingStore>((set) => ({
   roomId: "",
   meetingName: "",
   localUserId: "",
+  hostSecret: "",
 
   setClient: (client) => set({ client }),
   setState: (state) => set({ state }),
@@ -33,6 +36,7 @@ export const useMeetingStore = create<MeetingStore>((set) => ({
   setRoomId: (roomId) => set({ roomId }),
   setMeetingName: (meetingName) => set({ meetingName }),
   setLocalUserId: (localUserId) => set({ localUserId }),
+  setHostSecret: (hostSecret) => set({ hostSecret }),
   reset: () =>
-    set({ client: null, state: "disconnected", participants: [], roomId: "", meetingName: "", localUserId: "" }),
+    set({ client: null, state: "disconnected", participants: [], roomId: "", meetingName: "", localUserId: "", hostSecret: "" }),
 }));

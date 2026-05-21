@@ -10,7 +10,7 @@ import { GridLayout } from "./components/GridLayout.js";
 import { ChatPanel, type ChatMessage } from "./components/panels/ChatPanel.js";
 import { SettingsPanel, SettingsToggle, type SettingsSection } from "./components/panels/SettingsPanel.js";
 import type { LeftPanelDef } from "./components/LeftPanelOverlay.js";
-import { Link, Users, ChatCircle, GearSix, SquaresFour, Sidebar, Check, X } from "@phosphor-icons/react";
+import { Link, Users, ChatCircle, GearSix, SquaresFour, Sidebar, Check, X, Warning } from "@phosphor-icons/react";
 
 const API_URL = (import.meta.env["VITE_API_URL"] as string | undefined) ?? "http://localhost:3001";
 
@@ -18,7 +18,9 @@ const API_URL = (import.meta.env["VITE_API_URL"] as string | undefined) ?? "http
 
 type ChatPayload = { type: "chat"; from: string; text: string; ts: number };
 type HandPayload = { type: "hand"; raised: boolean; identity: string };
-type DataPayload = ChatPayload | HandPayload;
+type MeetingEndedPayload = { type: "meeting_ended" };
+type DeniedPayload = { type: "denied" };
+type DataPayload = ChatPayload | HandPayload | MeetingEndedPayload | DeniedPayload;
 
 function parsePayload(bytes: Uint8Array): DataPayload | null {
   try {
@@ -27,6 +29,8 @@ function parsePayload(bytes: Uint8Array): DataPayload | null {
     const p = parsed as Record<string, unknown>;
     if (p["type"] === "chat" && typeof p["text"] === "string") return p as unknown as ChatPayload;
     if (p["type"] === "hand" && typeof p["raised"] === "boolean") return p as unknown as HandPayload;
+    if (p["type"] === "meeting_ended") return { type: "meeting_ended" };
+    if (p["type"] === "denied") return { type: "denied" };
     return null;
   } catch {
     return null;
@@ -38,13 +42,83 @@ function parsePayload(bytes: Uint8Array): DataPayload | null {
 async function devApi(endpoint: string, body: Record<string, unknown>): Promise<void> {
   const res = await fetch(`${API_URL}/dev/${endpoint}`, {
     method: "POST",
-    headers,
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({})) as { message?: string };
     throw new Error(err.message ?? `${endpoint} fehlgeschlagen`);
   }
+}
+
+// ─── Toast ────────────────────────────────────────────────────────────────────
+
+type Toast = { id: string; message: string };
+
+function ToastStack({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id: string) => void }) {
+  if (toasts.length === 0) return null;
+  return (
+    <div className="fixed bottom-24 right-4 z-50 flex flex-col gap-2 pointer-events-none">
+      {toasts.map((t) => (
+        <div
+          key={t.id}
+          className="flex items-center gap-2 bg-red-900/90 border border-red-500/40 text-red-100 text-xs px-3 py-2 rounded-xl shadow-xl backdrop-blur-sm pointer-events-auto"
+        >
+          <Warning size={14} weight="fill" className="shrink-0 text-red-400" />
+          <span>{t.message}</span>
+          <button onClick={() => onDismiss(t.id)} className="ml-1 text-red-300 hover:text-white">
+            <X size={12} weight="bold" />
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── Disconnect reason screens ────────────────────────────────────────────────
+
+function MeetingEndedScreen({ onDismiss }: { onDismiss: () => void }) {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-vista-bg">
+      <div className="flex flex-col items-center gap-5 max-w-sm text-center px-6">
+        <div className="w-14 h-14 rounded-full bg-vista-surface border border-vista-border flex items-center justify-center">
+          <X size={24} weight="bold" className="text-white/60" />
+        </div>
+        <div>
+          <h2 className="text-lg font-semibold text-white mb-1">Meeting beendet</h2>
+          <p className="text-sm text-vista-muted">Der Host hat das Meeting beendet.</p>
+        </div>
+        <button
+          onClick={onDismiss}
+          className="px-5 py-2 bg-brand-500 hover:bg-brand-400 text-white text-sm font-semibold rounded-xl transition-colors"
+        >
+          Zurück zur Startseite
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function DeniedScreen({ onDismiss }: { onDismiss: () => void }) {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-vista-bg">
+      <div className="flex flex-col items-center gap-5 max-w-sm text-center px-6">
+        <div className="w-14 h-14 rounded-full bg-red-900/40 border border-red-500/30 flex items-center justify-center">
+          <Warning size={24} weight="fill" className="text-red-400" />
+        </div>
+        <div>
+          <h2 className="text-lg font-semibold text-white mb-1">Zutritt verweigert</h2>
+          <p className="text-sm text-vista-muted">Der Host hat deinen Beitritt abgelehnt.</p>
+        </div>
+        <button
+          onClick={onDismiss}
+          className="px-5 py-2 bg-vista-surface hover:bg-vista-elevated border border-vista-border text-white text-sm font-semibold rounded-xl transition-colors"
+        >
+          Zurück zur Startseite
+        </button>
+      </div>
+    </div>
+  );
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -54,6 +128,7 @@ export default function MeetingApp() {
     join, joinAsHost, leave, setMicrophone, setCamera, shareScreen, switchDevice,
     sendData, onData,
     state, participants, audioInputs, audioOutputs, videoInputs, isWaiting,
+    hostSecret,
   } = useMeeting();
   const { roomId, meetingName, localUserId } = useMeetingStore();
 
@@ -70,6 +145,20 @@ export default function MeetingApp() {
   const [raisedHands, setRaisedHands] = useState<ReadonlySet<string>>(new Set());
   const [localHandRaised, setLocalHandRaised] = useState(false);
   const localHandRaisedRef = useRef(false);
+
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const [disconnectReason, setDisconnectReason] = useState<"ended" | "denied" | null>(null);
+  const isHostRef = useRef(false);
+
+  const showToast = useCallback((message: string) => {
+    const id = crypto.randomUUID();
+    setToasts((prev) => [...prev, { id, message }]);
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 5000);
+  }, []);
+
+  const dismissToast = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
 
   // ─── Join handlers ─────────────────────────────────────────────────────────
 
@@ -94,8 +183,9 @@ export default function MeetingApp() {
       meetingName: string;
       livekitToken: string;
       participantId: string;
+      hostSecret: string;
     };
-    await joinAsHost(data.meetingToken, data.meetingName, data.livekitToken, data.participantId);
+    await joinAsHost(data.meetingToken, data.meetingName, data.livekitToken, data.participantId, data.hostSecret);
   };
 
   // ─── Data channel ──────────────────────────────────────────────────────────
@@ -118,6 +208,12 @@ export default function MeetingApp() {
           else next.delete(msg.identity);
           return next;
         });
+      } else if (msg.type === "meeting_ended" && !isHostRef.current) {
+        // Server ended the meeting — show the ended screen after disconnect
+        setDisconnectReason("ended");
+      } else if (msg.type === "denied") {
+        // Host denied us from the waiting room
+        setDisconnectReason("denied");
       }
     });
     return unsub;
@@ -130,6 +226,8 @@ export default function MeetingApp() {
 
   const localUser = participants.find((p) => p.id === localUserId);
   const isHost = localUser?.role === "host";
+  // Keep a ref so DataChannel handlers can check without stale closures
+  isHostRef.current = isHost;
   const waitingUsers = participants.filter((p) => p.role === "waiting");
   const activeParticipants = participants.filter((p) => p.role !== "waiting");
 
@@ -164,53 +262,72 @@ export default function MeetingApp() {
   // ─── Dev API actions ──────────────────────────────────────────────────────
 
   const kickParticipant = useCallback(async (participantId: string) => {
-    await devApi("kick", { roomId, participantIdentity: participantId });
-  }, [roomId]);
+    try {
+      await devApi("kick", { roomId, participantIdentity: participantId, hostSecret });
+    } catch (err) { showToast((err as Error).message); }
+  }, [roomId, hostSecret, showToast]);
 
   const muteParticipant = useCallback(async (participantId: string, currentlyMuted: boolean) => {
-    await devApi("mute-participant", { roomId, participantIdentity: participantId, muted: !currentlyMuted });
-  }, [roomId]);
+    try {
+      await devApi("mute-participant", { roomId, participantIdentity: participantId, muted: !currentlyMuted, hostSecret });
+    } catch (err) { showToast((err as Error).message); }
+  }, [roomId, hostSecret, showToast]);
 
   const toggleCameraOff = useCallback(async (participantId: string, currentlyCameraOff: boolean) => {
-    await devApi("camera-participant", { roomId, participantIdentity: participantId, cameraOff: !currentlyCameraOff });
-  }, [roomId]);
+    try {
+      await devApi("camera-participant", { roomId, participantIdentity: participantId, cameraOff: !currentlyCameraOff, hostSecret });
+    } catch (err) { showToast((err as Error).message); }
+  }, [roomId, hostSecret, showToast]);
 
   const toggleScreenSharePermission = useCallback(async (participantId: string, currentlySharing: boolean) => {
-    await devApi("screenshare-permission", { roomId, participantIdentity: participantId, allowed: !currentlySharing });
-  }, [roomId]);
+    try {
+      await devApi("screenshare-permission", { roomId, participantIdentity: participantId, allowed: !currentlySharing, hostSecret });
+    } catch (err) { showToast((err as Error).message); }
+  }, [roomId, hostSecret, showToast]);
 
   const admitParticipant = useCallback(async (participantId: string) => {
-    await devApi("admit-participant", { roomId, participantIdentity: participantId });
-  }, [roomId]);
+    try {
+      await devApi("admit-participant", { roomId, participantIdentity: participantId, hostSecret });
+    } catch (err) { showToast((err as Error).message); }
+  }, [roomId, hostSecret, showToast]);
 
   const denyParticipant = useCallback(async (participantId: string) => {
-    await devApi("deny-participant", { roomId, participantIdentity: participantId });
-  }, [roomId]);
+    try {
+      await devApi("deny-participant", { roomId, participantIdentity: participantId, hostSecret });
+    } catch (err) { showToast((err as Error).message); }
+  }, [roomId, hostSecret, showToast]);
 
   const toggleRoomClosed = useCallback(async (closed: boolean) => {
     setRoomClosed(closed);
     try {
-      await devApi("set-room-config", { roomId, closed });
-    } catch {
+      await devApi("set-room-config", { roomId, closed, hostSecret });
+    } catch (err) {
       setRoomClosed(!closed);
+      showToast((err as Error).message);
     }
-  }, [roomId]);
+  }, [roomId, hostSecret, showToast]);
 
   const handleLeave = useCallback(async () => {
     if (isHost) {
-      // End the meeting: kick everyone + close the room, then disconnect
+      // End the meeting: notifies all guests + closes room, then disconnect
       try {
-        await devApi("end-meeting", { roomId });
+        await devApi("end-meeting", { roomId, hostSecret });
       } catch {
         // Continue with disconnect even if the API call fails
       }
     }
     await leave();
-  }, [isHost, roomId, leave]);
+  }, [isHost, roomId, hostSecret, leave]);
 
   // ─── Render: pre-join / waiting ───────────────────────────────────────────
 
   if (state === "disconnected") {
+    if (disconnectReason === "ended") {
+      return <MeetingEndedScreen onDismiss={() => setDisconnectReason(null)} />;
+    }
+    if (disconnectReason === "denied") {
+      return <DeniedScreen onDismiss={() => setDisconnectReason(null)} />;
+    }
     return <JoinForm onJoin={handleGuestJoin} onHost={handleHostCreate} />;
   }
 
@@ -437,6 +554,8 @@ export default function MeetingApp() {
         handRaised={localHandRaised}
         {...(isHost ? { onSettingsToggle: () => togglePanel("settings"), settingsOpen: activePanel === "settings", isHost: true } : {})}
       />
+
+      <ToastStack toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }

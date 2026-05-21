@@ -14,12 +14,14 @@ export function useMeeting() {
     participants,
     roomId,
     meetingName,
+    hostSecret,
     setClient,
     setState,
     setParticipants,
     setRoomId,
     setMeetingName,
     setLocalUserId,
+    setHostSecret,
     reset,
   } = useMeetingStore();
 
@@ -71,7 +73,7 @@ export function useMeeting() {
       await meetingClient.join(roomToken, livekitToken);
       await enumerateDevices();
     },
-    [setClient, setRoomId, setMeetingName, setLocalUserId, setState, setParticipants, enumerateDevices],
+    [setClient, setRoomId, setMeetingName, setLocalUserId, setState, setParticipants, setHostSecret, enumerateDevices],
   );
 
   // Guest join: fetches token from /dev/guest-token using the meeting token (UUID).
@@ -101,10 +103,11 @@ export function useMeeting() {
 
   // Host join: receives pre-fetched tokens from MeetingApp (after calling /dev/create-meeting).
   const joinAsHost = useCallback(
-    async (meetingToken: string, name: string, livekitToken: string, participantId: string) => {
+    async (meetingToken: string, name: string, livekitToken: string, participantId: string, secret: string) => {
+      setHostSecret(secret);
       await _connectToRoom(meetingToken, livekitToken, participantId, name);
     },
-    [_connectToRoom],
+    [_connectToRoom, setHostSecret],
   );
 
   const leave = useCallback(async () => {
@@ -173,6 +176,7 @@ export function useMeeting() {
     participants,
     roomId,
     meetingName,
+    hostSecret,
     audioInputs,
     audioOutputs,
     videoInputs,

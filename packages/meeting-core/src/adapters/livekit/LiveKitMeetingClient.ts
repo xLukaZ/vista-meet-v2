@@ -286,4 +286,13 @@ export class LiveKitMeetingClient implements MeetingClient {
     this.room.on(RoomEvent.DataReceived, handler);
     return () => this.room.off(RoomEvent.DataReceived, handler);
   }
+
+  /**
+   * Exposes the underlying LiveKit Room instance for adapters that need direct
+   * room access (e.g. LiveKitDataChannelTransport for presence sync).
+   * @internal — only use in adapters within this monorepo.
+   */
+  getInternalRoom(): Room {
+    return this.room;
+  }
 }

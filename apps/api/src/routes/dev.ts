@@ -229,9 +229,12 @@ export const devRoute = new Hono()
       return c.json({ code: "UNAUTHORIZED", message: "Ungültiges Host-Secret" }, 403);
     }
 
-    // Notify the guest before kicking so they can show "access denied" screen
+    // Notify the guest before kicking so they can show "access denied" screen.
+    // We wait 400ms after sending to give LiveKit time to deliver the message
+    // before the connection is torn down by removeParticipant.
     try {
       await livekitService.sendData(roomId, { type: "denied" }, [participantIdentity]);
+      await new Promise((r) => setTimeout(r, 400));
     } catch { /* participant may not be subscribed yet, continue anyway */ }
 
     await livekitService.removeParticipant(roomId, participantIdentity);
@@ -268,9 +271,12 @@ export const devRoute = new Hono()
       return c.json({ code: "UNAUTHORIZED", message: "Ungültiges Host-Secret" }, 403);
     }
 
-    // Notify all participants before deleting the room
+    // Notify all participants before deleting the room.
+    // We wait 400ms after sending to give LiveKit time to deliver the message
+    // before the connection is torn down by deleteRoom.
     try {
       await livekitService.sendData(roomId, { type: "meeting_ended" });
+      await new Promise((r) => setTimeout(r, 400));
     } catch { /* room may already be empty */ }
 
     try {

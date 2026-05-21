@@ -38,7 +38,7 @@ export function usePresence(
     const transport = transportRef.current;
     if (!transport || !layer) return;
 
-    const unsub = transport.onRemoteState(async (states) => {
+    const unsub = transport.onRemoteState(async (states: Map<string, AvatarState>) => {
       // Add / update tags for each remote participant
       for (const [uid, state] of states) {
         const existingId = remoteTagIds.current.get(uid);

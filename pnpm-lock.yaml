@@ -96,6 +96,9 @@ importers:
       '@meet-vista/matterport-runtime':
         specifier: workspace:*
         version: link:../../packages/matterport-runtime
+      '@meet-vista/presence-core':
+        specifier: workspace:^
+        version: link:../../packages/presence-core
       react:
         specifier: ^18.3.1
         version: 18.3.1

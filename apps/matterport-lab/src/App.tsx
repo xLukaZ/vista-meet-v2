@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { MatterportRuntimeImpl } from "@meet-vista/matterport-runtime";
 import type { CameraPose, MatterportObjectLayer } from "@meet-vista/matterport-runtime";
 import { createAvatarObject } from "@meet-vista/matterport-objects";
+import { usePresence } from "./hooks/usePresence.js";
 
 const SDK_KEY = import.meta.env["VITE_MATTERPORT_SDK_KEY"] as string;
 const DEFAULT_MODEL = (import.meta.env["VITE_MATTERPORT_MODEL_ID"] as string) ?? "SxQL3iGyoDo";
@@ -177,9 +178,17 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [pose, setPose] = useState<CameraPose | null>(null);
 
-  // ─── Avatar / object layer state ──────────────────────────────────────────
+  // ─── Object layer (set after SDK connects) ────────────────────────────────
+  const [objectLayer, setObjectLayer] = useState<MatterportObjectLayer | null>(null);
+
+  // ─── Manual avatar placement (Sprint 4) ───────────────────────────────────
   const [avatarName, setAvatarName] = useState("Test-Avatar");
   const [placedAvatars, setPlacedAvatars] = useState<{ id: string; name: string }[]>([]);
+
+  // ─── Presence simulation (Sprint 5) ───────────────────────────────────────
+  const [simName, setSimName] = useState("Remote-User");
+  const [simCount, setSimCount] = useState(0);
+  const simIdsRef = useRef<string[]>([]);
 
   const mount = useCallback(async () => {
     if (!containerRef.current) return;
@@ -195,6 +204,10 @@ export function App() {
     setStatus("loading");
     setError(null);
     setPose(null);
+    setObjectLayer(null);
+    setPlacedAvatars([]);
+    simIdsRef.current = [];
+    setSimCount(0);
 
     const runtime = new MatterportRuntimeImpl();
     runtimeRef.current = runtime;
@@ -208,6 +221,7 @@ export function App() {
         ...(BUNDLE_URL ? { bundleUrl: BUNDLE_URL } : {}),
         options: { autoplay: true },
       });
+      setObjectLayer(runtime.getObjectLayer());
       setStatus("connected");
     } catch (err) {
       setStatus("error");
@@ -258,6 +272,38 @@ export function App() {
       setPlacedAvatars([]);
     } catch { /* ignore */ }
   }, []);
+
+  // ── Presence hook (Sprint 5) ───────────────────────────────────────────────
+  const { simulateRemote, removeSimulated, clearSimulated } = usePresence(
+    "local-user",
+    objectLayer,
+    pose,
+  );
+
+  const addSimulatedParticipant = useCallback(() => {
+    if (!pose) return;
+    const uid = `sim_${Date.now()}`;
+    simIdsRef.current.push(uid);
+    setSimCount((c) => c + 1);
+    // Place the simulated user slightly offset from current camera position
+    const offset = simIdsRef.current.length * 0.8;
+    simulateRemote({
+      userId: uid,
+      roomId: "matterport-lab",
+      position: { x: pose.position.x + offset, y: pose.position.y, z: pose.position.z },
+      rotation: { x: 0, y: pose.rotation.y, z: 0, w: 1 },
+      animation: "idle",
+      speaking: false,
+      muted: true,
+      timestamp: Date.now(),
+    });
+  }, [pose, simulateRemote]);
+
+  const clearAllSimulated = useCallback(() => {
+    simIdsRef.current.forEach((uid) => removeSimulated(uid));
+    simIdsRef.current = [];
+    setSimCount(0);
+  }, [removeSimulated]);
 
   // Auto-mount on first render
   useEffect(() => {
@@ -324,10 +370,10 @@ export function App() {
             </div>
           )}
 
-          {/* Avatar placement (Sprint 4 test) */}
+          {/* Avatar placement — manual (Sprint 4) */}
           {status === "connected" && (
             <div style={S.section}>
-              <div style={S.sectionTitle}>Avatare (Sprint 4)</div>
+              <div style={S.sectionTitle}>Avatare platzieren</div>
               <input
                 style={{ ...S.input, marginBottom: "6px" }}
                 value={avatarName}
@@ -342,24 +388,45 @@ export function App() {
               >
                 + Hier platzieren
               </button>
+              {placedAvatars.map((a) => (
+                <div key={a.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "4px" }}>
+                  <span style={{ color: "#AD38B5", fontSize: "11px" }}>● {a.name}</span>
+                  <button style={{ background: "none", border: "none", color: "#555", cursor: "pointer", fontSize: "12px", padding: "0 4px" }}
+                    onClick={() => void removeAvatar(a.id)}>✕</button>
+                </div>
+              ))}
               {placedAvatars.length > 0 && (
+                <button style={{ ...S.btn("default"), marginTop: "4px", fontSize: "11px" }} onClick={() => void clearAvatars()}>
+                  Alle entfernen
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Presence simulation (Sprint 5) */}
+          {status === "connected" && (
+            <div style={S.section}>
+              <div style={S.sectionTitle}>Presence (Sprint 5)</div>
+              <span style={{ color: "#555", fontSize: "11px", display: "block", marginBottom: "8px" }}>
+                Simuliert Remote-Teilnehmer via LocalPresenceTransport
+              </span>
+              <button
+                style={{ ...S.btn("primary"), marginBottom: "6px" }}
+                onClick={addSimulatedParticipant}
+                disabled={!pose}
+              >
+                + Remote-Teilnehmer
+              </button>
+              {simCount > 0 && (
                 <>
-                  {placedAvatars.map((a) => (
-                    <div key={a.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "4px" }}>
-                      <span style={{ color: "#AD38B5", fontSize: "11px" }}>● {a.name}</span>
-                      <button
-                        style={{ background: "none", border: "none", color: "#555", cursor: "pointer", fontSize: "12px", padding: "0 4px" }}
-                        onClick={() => void removeAvatar(a.id)}
-                      >✕</button>
-                    </div>
-                  ))}
-                  <button style={{ ...S.btn("default"), marginTop: "4px", fontSize: "11px" }} onClick={() => void clearAvatars()}>
+                  <div style={{ ...S.poseRow, marginTop: "4px" }}>
+                    <span style={S.poseLabel}>Simuliert</span>
+                    <span style={S.poseValue}>{simCount} Teilnehmer</span>
+                  </div>
+                  <button style={{ ...S.btn("default"), marginTop: "4px", fontSize: "11px" }} onClick={clearAllSimulated}>
                     Alle entfernen
                   </button>
                 </>
-              )}
-              {placedAvatars.length === 0 && (
-                <span style={{ color: "#444", fontSize: "11px" }}>Bewege die Kamera und platziere einen Avatar an der aktuellen Position.</span>
               )}
             </div>
           )}

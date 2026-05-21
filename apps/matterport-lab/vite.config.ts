@@ -15,6 +15,10 @@ export default defineConfig({
         __dirname,
         "../../packages/matterport-objects/src/index.ts"
       ),
+      "@meet-vista/presence-core": path.resolve(
+        __dirname,
+        "../../packages/presence-core/src/index.ts"
+      ),
     },
   },
   server: { port: 5174 },

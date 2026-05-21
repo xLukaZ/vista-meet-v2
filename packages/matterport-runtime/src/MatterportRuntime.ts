@@ -1,5 +1,6 @@
 import { createError } from "@meet-vista/core";
-import { loadMatterportBundle, DEFAULT_BUNDLE_URL } from "./bundle-loader.js";
+import { setupSdk } from "@matterport/sdk";
+import type { MpSdk } from "@matterport/sdk";
 import type {
   MatterportRuntime as IMatterportRuntime,
   MatterportConfig,
@@ -7,61 +8,18 @@ import type {
   MatterportObjectLayer,
 } from "./types.js";
 
-// ─── Matterport SDK internal types (minimal subset) ───────────────────────────
-
-type MpVec3 = { x: number; y: number; z: number };
-
-/** Matterport camera pose as returned by Camera.pose.subscribe */
-type MpCameraPose = {
-  position: MpVec3;
-  /** Euler angles in degrees */
-  rotation: MpVec3;
-  projection?: { fov?: number };
-};
-
-type MpSdkSubscription = { cancel(): void };
-
-type MpSdkInstance = {
-  Camera: {
-    pose: {
-      subscribe(cb: (pose: MpCameraPose) => void): MpSdkSubscription;
-    };
-    tweenTo(
-      dest: { position?: MpVec3; rotation?: MpVec3 },
-      opts?: { transition?: unknown; transitionTime?: number }
-    ): Promise<void>;
-  };
-  Transition: {
-    FLY: unknown;
-    INSTANT: unknown;
-  };
-};
-
-declare global {
-  interface Window {
-    MP_SDK?: {
-      connect(
-        iframe: HTMLIFrameElement,
-        apiKey: string,
-        sdkVersion: string
-      ): Promise<MpSdkInstance>;
-    };
-    MATTERPORT_SDK_LOADED?: boolean;
-  }
-}
-
 // ─── Runtime implementation ───────────────────────────────────────────────────
 
 type CameraListener = (pose: CameraPose) => void;
 type ReadyListener = () => void;
 
 export class MatterportRuntimeImpl implements IMatterportRuntime {
-  private mpSdk: MpSdkInstance | null = null;
+  private mpSdk: MpSdk | null = null;
   private iframe: HTMLIFrameElement | null = null;
   private ready = false;
   private readyListeners: Set<ReadyListener> = new Set();
   private cameraListeners: Set<CameraListener> = new Set();
-  private cameraSub: MpSdkSubscription | null = null;
+  private cameraSub: { cancel(): void } | null = null;
   private objectLayer: MatterportObjectLayer | null = null;
   private lastPose: CameraPose = {
     position: { x: 0, y: 0, z: 0 },
@@ -70,43 +28,42 @@ export class MatterportRuntimeImpl implements IMatterportRuntime {
   };
 
   async mount(container: HTMLElement, config: MatterportConfig): Promise<void> {
-    const bundleUrl = config.bundleUrl ?? DEFAULT_BUNDLE_URL;
+    // Connect via the official @matterport/sdk package.
+    //
+    // IMPORTANT: do NOT pre-create the iframe and pass it via `iframe:`.
+    // When setupSdk receives an existing iframe it skips setting the src, so
+    // the handshake never completes. Instead pass `container:` and let setupSdk
+    // create the iframe — afterwards we grab the reference from the DOM.
+    //
+    // bundleUrl / domain: when set, points to a self-hosted Matterport bundle.
+    // Self-hosting is REQUIRED for Sprint 4+ Scene API access (3D avatars/objects).
+    // Without it the SDK loads from my.matterport.com which blocks scene-graph access.
+    // To self-host: download the bundle from the Matterport developer portal, host it
+    // at a public URL, then set VITE_MATTERPORT_BUNDLE_URL=https://your-domain.com/bundle/
+    const domain = config.bundleUrl
+      ? new URL(config.bundleUrl).hostname
+      : undefined; // undefined → defaults to my.matterport.com
 
-    // Step 1: Load the SDK script — exposes window.MP_SDK in the parent frame
     try {
-      await loadMatterportBundle(bundleUrl);
-    } catch (err) {
-      throw createError("MP_LOAD_FAILED", "Failed to load Matterport SDK bundle", err);
-    }
-
-    if (!window.MP_SDK) {
-      throw createError("MP_LOAD_FAILED", "MP_SDK not found on window after bundle load");
-    }
-
-    // Step 2: Create iframe pointing at the Matterport showcase
-    this.iframe = document.createElement("iframe");
-    this.iframe.style.cssText = "width:100%;height:100%;border:none;display:block;";
-    this.iframe.allow = "xr-spatial-tracking; fullscreen";
-    this.iframe.allowFullscreen = true;
-
-    const params = new URLSearchParams({
-      m: config.modelId,
-      play: "1",
-      applicationKey: config.sdkKey,
-      ...(config.options?.hideUI ? { help: "0", qs: "1", gt: "0", hr: "0" } : {}),
-    });
-    this.iframe.src = `https://my.matterport.com/show/?${params.toString()}`;
-    container.appendChild(this.iframe);
-
-    // Step 3: Connect SDK to iframe — this promise resolves when the showcase
-    // inside the iframe is fully loaded and the SDK handshake is complete.
-    try {
-      this.mpSdk = await window.MP_SDK.connect(this.iframe, config.sdkKey, "3.5");
+      this.mpSdk = await setupSdk(config.sdkKey, {
+        space: config.modelId,
+        container,                        // setupSdk creates the iframe inside container
+        iframeQueryParams: { play: 1 },
+        iframeAttributes: {
+          style: "width:100%;height:100%;border:none;display:block;",
+          allow: "xr-spatial-tracking; fullscreen",
+          allowfullscreen: "true",
+        },
+        ...(domain ? { domain } : {}),
+      });
     } catch (err) {
       throw createError("MP_LOAD_FAILED", "Failed to connect to Matterport SDK", err);
     }
 
-    // Step 4: Subscribe to camera events and mark as ready
+    // Grab the iframe setupSdk created so we can remove it on dispose()
+    this.iframe = container.querySelector("iframe");
+
+    // Step 3: Subscribe to camera events and mark as ready
     this.bindCameraEvents();
     this.ready = true;
     for (const cb of this.readyListeners) cb();
@@ -116,14 +73,15 @@ export class MatterportRuntimeImpl implements IMatterportRuntime {
   private bindCameraEvents(): void {
     if (!this.mpSdk) return;
 
+    // Camera.Pose in the new SDK has:
+    //   position: Vector3  (x, y, z)
+    //   rotation: Vector2  (x=pitch, y=yaw)
+    // We store pitch/yaw in rotation.x/y (z=0, w=1 unused).
     const sub = this.mpSdk.Camera.pose.subscribe((pose) => {
-      // Matterport gives Euler angles in degrees.
-      // We store them in the Quat fields (x=pitch, y=yaw, z=roll, w unused).
-      // Proper Euler→Quat conversion happens in Sprint 4 when avatars need real quats.
       this.lastPose = {
         position: { x: pose.position.x, y: pose.position.y, z: pose.position.z },
-        rotation: { x: pose.rotation.x, y: pose.rotation.y, z: pose.rotation.z, w: 1 },
-        fov: pose.projection?.fov ?? 90,
+        rotation: { x: pose.rotation.x, y: pose.rotation.y, z: 0, w: 1 },
+        fov: 90, // new SDK does not expose fov directly in pose
       };
       for (const cb of this.cameraListeners) cb(this.lastPose);
     });
@@ -151,13 +109,12 @@ export class MatterportRuntimeImpl implements IMatterportRuntime {
     if (!this.ready || !this.mpSdk) {
       throw createError("MP_LOAD_FAILED", "Matterport not ready");
     }
-    await this.mpSdk.Camera.tweenTo(
-      {
-        position: { x: pose.position.x, y: pose.position.y, z: pose.position.z },
-        rotation: { x: pose.rotation.x, y: pose.rotation.y, z: pose.rotation.z },
-      },
-      { transition: this.mpSdk.Transition.FLY, transitionTime: 1500 }
-    );
+    // Mode.moveTo with INSIDE mode moves the camera to the given position/rotation
+    await this.mpSdk.Mode.moveTo(this.mpSdk.Mode.Mode.INSIDE, {
+      position: { x: pose.position.x, y: pose.position.y, z: pose.position.z },
+      rotation: { x: pose.rotation.x, y: pose.rotation.y },
+      transition: this.mpSdk.Mode.TransitionType.FLY,
+    });
   }
 
   onCameraChanged(cb: CameraListener): () => void {
